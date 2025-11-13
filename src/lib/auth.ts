@@ -19,17 +19,28 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async session({ session, token, user }) {
-      if (session.user) {
-        session.user.id = token?.sub || user?.id;
-      }
-      return session;
-    },
-    async jwt({ token, user }) {
+    async jwt({ token, user, account, profile, trigger }) {
+      // On sign in, get user from database and add ID to token
       if (user) {
         token.id = user.id;
       }
+      // If no user.id in token, fetch from database using email
+      if (!token.id && token.email) {
+        const dbUser = await prisma.user.findUnique({
+          where: { email: token.email },
+        });
+        if (dbUser) {
+          token.id = dbUser.id;
+        }
+      }
       return token;
+    },
+    async session({ session, token }) {
+      // Add user ID from token to session
+      if (token && session.user) {
+        session.user.id = token.id as string;
+      }
+      return session;
     },
   },
   pages: {
@@ -41,5 +52,6 @@ export const authOptions: NextAuthOptions = {
     maxAge: 30 * 24 * 60 * 60, // 30 days
   },
   secret: process.env.NEXTAUTH_SECRET,
-  debug: process.env.NODE_ENV === 'development',
+  debug: true, // Enable debug mode to see errors
+  useSecureCookies: process.env.NODE_ENV === 'production',
 };
