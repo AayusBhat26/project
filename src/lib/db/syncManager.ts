@@ -146,20 +146,39 @@ class SyncManager {
         fetchWithTimeout('/api/habit-logs').then(r => r.json()).catch(() => []),
       ]);
 
-      // Store in IndexedDB only if we got data
-      if (tasks.length || notes.length || expenses.length || habits.length || habitLogs.length) {
-        await Promise.all([
-          tasks.length && db.tasks.bulkPut(tasks.map((t: any) => ({ ...t, syncStatus: 'synced' }))),
-          notes.length && db.notes.bulkPut(notes.map((n: any) => ({ ...n, syncStatus: 'synced' }))),
-          expenses.length && db.expenses.bulkPut(expenses.map((e: any) => ({ ...e, syncStatus: 'synced' }))),
-          habits.length && db.habits.bulkPut(habits.map((h: any) => ({ ...h, syncStatus: 'synced' }))),
-          habitLogs.length && db.habitLogs.bulkPut(habitLogs.map((l: any) => ({ ...l, syncStatus: 'synced' }))),
-        ].filter(Boolean));
+      console.log('📥 Fetched from server:', {
+        tasks: tasks.length,
+        notes: notes.length,
+        expenses: expenses.length,
+        habits: habits.length,
+        habitLogs: habitLogs.length,
+      });
 
-        console.log('✅ Data fetched and stored locally');
-      } else {
-        console.log('📴 No data from server, using cached data');
+      // Clear and repopulate IndexedDB with server data
+      await db.tasks.where('userId').equals(userId).delete();
+      await db.notes.where('userId').equals(userId).delete();
+      await db.expenses.where('userId').equals(userId).delete();
+      await db.habits.where('userId').equals(userId).delete();
+      await db.habitLogs.where('userId').equals(userId).delete();
+
+      // Add fresh data from server
+      if (tasks.length > 0) {
+        await db.tasks.bulkAdd(tasks.map((t: any) => ({ ...t, syncStatus: 'synced' })));
       }
+      if (notes.length > 0) {
+        await db.notes.bulkAdd(notes.map((n: any) => ({ ...n, syncStatus: 'synced' })));
+      }
+      if (expenses.length > 0) {
+        await db.expenses.bulkAdd(expenses.map((e: any) => ({ ...e, syncStatus: 'synced' })));
+      }
+      if (habits.length > 0) {
+        await db.habits.bulkAdd(habits.map((h: any) => ({ ...h, syncStatus: 'synced' })));
+      }
+      if (habitLogs.length > 0) {
+        await db.habitLogs.bulkAdd(habitLogs.map((l: any) => ({ ...l, syncStatus: 'synced' })));
+      }
+
+      console.log('✅ Data fetched and stored locally');
     } catch (error) {
       console.log('📴 Failed to fetch from server, using cached data');
     }
