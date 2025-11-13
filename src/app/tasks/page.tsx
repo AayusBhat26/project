@@ -4,9 +4,6 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Navbar from '@/components/Navbar';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db/indexedDB';
-import { syncManager } from '@/lib/db/syncManager';
 import { FaCheckSquare, FaPlus, FaTimes, FaFlag, FaCalendarAlt, FaSquare } from 'react-icons/fa';
 
 export default function TasksPage() {
@@ -16,6 +13,8 @@ export default function TasksPage() {
   const [editingTask, setEditingTask] = useState<any>(null);
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -25,16 +24,28 @@ export default function TasksPage() {
     completed: false,
   });
 
-  const tasks = useLiveQuery(() =>
-    session?.user?.id ? db.tasks.where('userId').equals(session.user.id).toArray() : []
-  );
+  const fetchTasks = async () => {
+    if (!session?.user?.id) return;
+    
+    setLoading(true);
+    try {
+      const response = await fetch('/api/tasks');
+      if (response.ok) {
+        const data = await response.json();
+        setTasks(data);
+      }
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/auth/signin');
     } else if (status === 'authenticated' && session?.user?.id) {
-      // Sync in background
-      syncManager.fetchAndStoreData(session.user.id);
+      fetchTasks();
     }
   }, [status, session, router]);
 
@@ -50,10 +61,24 @@ export default function TasksPage() {
       updatedAt: new Date(),
     };
 
-    if (editingTask) {
-      await syncManager.updateItem('tasks', editingTask.id, taskData);
-    } else {
-      await syncManager.addItem('tasks', taskData);
+    try {
+      if (editingTask) {
+        await fetch(`/api/tasks/${editingTask.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(taskData),
+        });
+      } else {
+        await fetch('/api/tasks', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(taskData),
+        });
+      }
+      await fetchTasks(); // Refresh the list
+    } catch (error) {
+      console.error('Error saving task:', error);
+      alert('Failed to save task. Please try again.');
     }
 
     setShowModal(false);
@@ -77,15 +102,28 @@ export default function TasksPage() {
   const handleDelete = async (id: string) => {
     if (!session?.user?.id) return;
     if (confirm('Are you sure you want to delete this task?')) {
-      await syncManager.deleteItem('tasks', id, session.user.id);
+      try {
+        await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+        await fetchTasks(); // Refresh the list
+      } catch (error) {
+        console.error('Error deleting task:', error);
+        alert('Failed to delete task. Please try again.');
+      }
     }
   };
 
   const toggleComplete = async (task: any) => {
     if (!session?.user?.id) return;
-    await syncManager.updateItem('tasks', task.id, {
-      completed: !task.completed,
-    });
+    try {
+      await fetch(`/api/tasks/${task.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...task, completed: !task.completed }),
+      });
+      await fetchTasks(); // Refresh the list
+    } catch (error) {
+      console.error('Error updating task:', error);
+    }
   };
 
   const getPriorityColor = (priority: string) => {
