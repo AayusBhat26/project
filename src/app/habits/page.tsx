@@ -4,9 +4,6 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Navbar from '@/components/Navbar';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db/indexedDB';
-import { syncManager } from '@/lib/db/syncManager';
 import { FaCheckCircle, FaPlus, FaTimes, FaFire, FaCalendarAlt } from 'react-icons/fa';
 import { getWeekDates, isToday } from '@/lib/utils';
 
@@ -15,6 +12,9 @@ export default function HabitsPage() {
   const router = useRouter();
   const [showModal, setShowModal] = useState(false);
   const [editingHabit, setEditingHabit] = useState<any>(null);
+  const [habits, setHabits] = useState<any[]>([]);
+  const [habitLogs, setHabitLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -24,20 +24,28 @@ export default function HabitsPage() {
     icon: '✓',
   });
 
-  const habits = useLiveQuery(() =>
-    session?.user?.id ? db.habits.where('userId').equals(session.user.id).toArray() : []
-  );
-
-  const habitLogs = useLiveQuery(() =>
-    session?.user?.id ? db.habitLogs.where('userId').equals(session.user.id).toArray() : []
-  );
+  const fetchHabits = async () => {
+    if (!session?.user?.id) return;
+    setLoading(true);
+    try {
+      const [habitsRes, logsRes] = await Promise.all([
+        fetch('/api/habits'),
+        fetch('/api/habit-logs'),
+      ]);
+      if (habitsRes.ok) setHabits(await habitsRes.json());
+      if (logsRes.ok) setHabitLogs(await logsRes.json());
+    } catch (error) {
+      console.error('Error fetching habits:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/auth/signin');
     } else if (status === 'authenticated' && session?.user?.id) {
-      // Sync in background
-      syncManager.fetchAndStoreData(session.user.id);
+      fetchHabits();
     }
   }, [status, session, router]);
 
@@ -53,10 +61,24 @@ export default function HabitsPage() {
       updatedAt: new Date(),
     };
 
-    if (editingHabit) {
-      await syncManager.updateItem('habits', editingHabit.id, habitData);
-    } else {
-      await syncManager.addItem('habits', habitData);
+    try {
+      if (editingHabit) {
+        await fetch(`/api/habits/${editingHabit.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(habitData),
+        });
+      } else {
+        await fetch('/api/habits', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(habitData),
+        });
+      }
+      await fetchHabits();
+    } catch (error) {
+      console.error('Error saving habit:', error);
+      alert('Failed to save habit. Please try again.');
     }
 
     setShowModal(false);
@@ -80,18 +102,17 @@ export default function HabitsPage() {
   const handleDelete = async (id: string) => {
     if (!session?.user?.id) return;
     if (confirm('Are you sure you want to delete this habit?')) {
-      await syncManager.deleteItem('habits', id, session.user.id);
+      try {
+        await fetch(`/api/habits/${id}`, { method: 'DELETE' });
+        await fetchHabits();
+      } catch (error) {
+        console.error('Error deleting habit:', error);
+      }
     }
   };
 
   const toggleHabitLog = async (habitId: string) => {
     if (!session?.user?.id) return;
-
-    // Don't allow logging for habits that haven't been synced yet
-    if (habitId.startsWith('temp-')) {
-      alert('Please wait for the habit to sync before logging');
-      return;
-    }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -101,16 +122,25 @@ export default function HabitsPage() {
       new Date(log.date).toDateString() === today.toDateString()
     );
 
-    if (existingLog) {
-      await syncManager.deleteItem('habitLogs', existingLog.id!, session.user.id);
-    } else {
-      await syncManager.addItem('habitLogs', {
-        habitId,
-        userId: session.user.id,
-        date: today,
-        completed: true,
-        createdAt: new Date(),
-      } as any);
+    try {
+      if (existingLog) {
+        await fetch(`/api/habit-logs/${existingLog.id}`, { method: 'DELETE' });
+      } else {
+        await fetch('/api/habit-logs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            habitId,
+            userId: session.user.id,
+            date: today,
+            completed: true,
+            createdAt: new Date(),
+          }),
+        });
+      }
+      await fetchHabits();
+    } catch (error) {
+      console.error('Error toggling habit log:', error);
     }
   };
 

@@ -4,9 +4,6 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Navbar from '@/components/Navbar';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db/indexedDB';
-import { syncManager } from '@/lib/db/syncManager';
 import { FaMoneyBillWave, FaPlus, FaTimes, FaArrowUp, FaArrowDown, FaChartLine } from 'react-icons/fa';
 import { formatCurrency, formatDate } from '@/lib/utils';
 
@@ -16,6 +13,8 @@ export default function ExpensesPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingExpense, setEditingExpense] = useState<any>(null);
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     amount: '',
@@ -25,16 +24,27 @@ export default function ExpensesPage() {
     description: '',
   });
 
-  const expenses = useLiveQuery(() =>
-    session?.user?.id ? db.expenses.where('userId').equals(session.user.id).toArray() : []
-  );
+  const fetchExpenses = async () => {
+    if (!session?.user?.id) return;
+    setLoading(true);
+    try {
+      const response = await fetch('/api/expenses');
+      if (response.ok) {
+        const data = await response.json();
+        setExpenses(data);
+      }
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/auth/signin');
     } else if (status === 'authenticated' && session?.user?.id) {
-      // Sync in background
-      syncManager.fetchAndStoreData(session.user.id);
+      fetchExpenses();
     }
   }, [status, session, router]);
 
@@ -51,10 +61,24 @@ export default function ExpensesPage() {
       updatedAt: new Date(),
     };
 
-    if (editingExpense) {
-      await syncManager.updateItem('expenses', editingExpense.id, expenseData);
-    } else {
-      await syncManager.addItem('expenses', expenseData);
+    try {
+      if (editingExpense) {
+        await fetch(`/api/expenses/${editingExpense.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(expenseData),
+        });
+      } else {
+        await fetch('/api/expenses', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(expenseData),
+        });
+      }
+      await fetchExpenses();
+    } catch (error) {
+      console.error('Error saving expense:', error);
+      alert('Failed to save expense. Please try again.');
     }
 
     setShowModal(false);
@@ -85,7 +109,12 @@ export default function ExpensesPage() {
   const handleDelete = async (id: string) => {
     if (!session?.user?.id) return;
     if (confirm('Are you sure you want to delete this transaction?')) {
-      await syncManager.deleteItem('expenses', id, session.user.id);
+      try {
+        await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
+        await fetchExpenses();
+      } catch (error) {
+        console.error('Error deleting expense:', error);
+      }
     }
   };
 

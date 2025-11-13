@@ -4,9 +4,6 @@ import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Navbar from '@/components/Navbar';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db/indexedDB';
-import { syncManager } from '@/lib/db/syncManager';
 import { FaStickyNote, FaPlus, FaTimes, FaSearch, FaThumbtack } from 'react-icons/fa';
 
 export default function NotesPage() {
@@ -15,6 +12,8 @@ export default function NotesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingNote, setEditingNote] = useState<any>(null);
+  const [notes, setNotes] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     content: '',
@@ -23,16 +22,27 @@ export default function NotesPage() {
     isPinned: false,
   });
 
-  const notes = useLiveQuery(() =>
-    session?.user?.id ? db.notes.where('userId').equals(session.user.id).toArray() : []
-  );
+  const fetchNotes = async () => {
+    if (!session?.user?.id) return;
+    setLoading(true);
+    try {
+      const response = await fetch('/api/notes');
+      if (response.ok) {
+        const data = await response.json();
+        setNotes(data);
+      }
+    } catch (error) {
+      console.error('Error fetching notes:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (status === 'unauthenticated') {
       router.push('/auth/signin');
     } else if (status === 'authenticated' && session?.user?.id) {
-      // Sync in background
-      syncManager.fetchAndStoreData(session.user.id);
+      fetchNotes();
     }
   }, [status, session, router]);
 
@@ -47,10 +57,24 @@ export default function NotesPage() {
       updatedAt: new Date(),
     };
 
-    if (editingNote) {
-      await syncManager.updateItem('notes', editingNote.id, noteData);
-    } else {
-      await syncManager.addItem('notes', noteData);
+    try {
+      if (editingNote) {
+        await fetch(`/api/notes/${editingNote.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(noteData),
+        });
+      } else {
+        await fetch('/api/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(noteData),
+        });
+      }
+      await fetchNotes();
+    } catch (error) {
+      console.error('Error saving note:', error);
+      alert('Failed to save note. Please try again.');
     }
 
     setShowModal(false);
@@ -73,12 +97,26 @@ export default function NotesPage() {
   const handleDelete = async (id: string) => {
     if (!session?.user?.id) return;
     if (confirm('Are you sure you want to delete this note?')) {
-      await syncManager.deleteItem('notes', id, session.user.id);
+      try {
+        await fetch(`/api/notes/${id}`, { method: 'DELETE' });
+        await fetchNotes();
+      } catch (error) {
+        console.error('Error deleting note:', error);
+      }
     }
   };
 
   const togglePin = async (note: any) => {
-    await syncManager.updateItem('notes', note.id, { isPinned: !note.isPinned });
+    try {
+      await fetch(`/api/notes/${note.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...note, isPinned: !note.isPinned }),
+      });
+      await fetchNotes();
+    } catch (error) {
+      console.error('Error pinning note:', error);
+    }
   };
 
   const filteredNotes = notes?.filter(note =>
