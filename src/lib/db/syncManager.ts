@@ -103,10 +103,16 @@ class SyncManager {
             });
           }
 
-          console.log(`✅ Synced ${collection} item:`, item.id);
+          console.log(`✅ Synced ${collection} item:`, item.id, '→', realId);
         } else {
           const errorText = await response.text();
-          console.error(`Failed to sync ${collection} item:`, item.id, errorText);
+          console.error(`❌ Failed to sync ${collection} item:`, item.id);
+          console.error(`Status: ${response.status}, Error:`, errorText);
+
+          // Alert user about sync failure
+          if (typeof window !== 'undefined') {
+            console.warn(`⚠️ Data saved locally but not synced to server. Will retry when connection is restored.`);
+          }
         }
       } catch (error) {
         console.error(`Failed to sync ${collection} item:`, item.id);

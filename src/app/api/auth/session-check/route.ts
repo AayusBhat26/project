@@ -5,7 +5,7 @@ import { authOptions } from '@/lib/auth';
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    
+
     return NextResponse.json({
       authenticated: !!session,
       session: session,
@@ -13,8 +13,8 @@ export async function GET() {
     });
   } catch (error: any) {
     return NextResponse.json(
-      { 
-        error: 'Session check failed', 
+      {
+        error: 'Session check failed',
         message: error.message,
         stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       },
